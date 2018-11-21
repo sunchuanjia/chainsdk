@@ -218,6 +218,7 @@ export type DposViewContext = {
     getVote: () => Promise<Map<string, BigNumber> >;
     getStake: (address: string) => Promise<BigNumber>;
     getCandidates: () => Promise<string[]>;
+    getMiners(): Promise<string[]>;
 } & ValueViewContext;
 
 export type DbftTransactionContext = {
@@ -329,3 +330,5 @@ export function toWei(value: string | number | BigNumber): BigNumber;
 export function fromWei(value: string | number | BigNumber): BigNumber;
 export function toCoin(value: string | number | BigNumber): BigNumber;
 export function fromCoin(value: string | number | BigNumber): BigNumber;
+
+export function MapToObject( input: Map<string, any> ): any;
