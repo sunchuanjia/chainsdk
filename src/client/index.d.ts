@@ -73,7 +73,7 @@ export class Transaction {
 
     input: any;
 
-    readonly hash?: string;
+    hash: string;
 
     sign(privateKey: Buffer|string): void;
 
