@@ -234,6 +234,8 @@ export type DbftEventContext = {
 export class ChainClient {
     constructor(options: {host: string, port: number, logger: LoggerInstance});
 
+    getPeers():Promise<string[]>;
+    
     getBlock(params: {which: string|number|'lastest', transactions?: boolean}): Promise<{err: ErrorCode, block?: any}>;
 
     getTransactionReceipt(params: {tx: string}): Promise<{err: ErrorCode, block?: any, tx?: any, receipt?: any}>;
