@@ -82,7 +82,9 @@ export class PowMiner extends ValueMiner {
 
     protected async _onTipBlock(chain: Chain, tipBlock: BlockHeader): Promise<void> {
         this.m_logger.info(`onTipBlock ${tipBlock.number} : ${tipBlock.hash}`);
-        this._createBlock(this._newHeader());
+        setTimeout(() => {
+            this._createBlock(this._newHeader());
+        }, this.m_chain!.globalOptions.targetTimespan * 1000 / 4);
     }
 
     protected _onCancel(state: MinerState, context?: {name: string} & any) {

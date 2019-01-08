@@ -73,7 +73,7 @@ export class Transaction {
 
     input: any;
 
-    hash: string;
+    readonly hash?: string;
 
     sign(privateKey: Buffer|string): void;
 
@@ -218,7 +218,6 @@ export type DposViewContext = {
     getVote: () => Promise<Map<string, BigNumber> >;
     getStake: (address: string) => Promise<BigNumber>;
     getCandidates: () => Promise<string[]>;
-    getMiners(): Promise<string[]>;
 } & ValueViewContext;
 
 export type DbftTransactionContext = {
@@ -231,11 +230,14 @@ export type DbftEventContext = {
     unregister: (caller: string, address: string) => Promise<ErrorCode>;
 } & ValueEventContext;
 
+export type DbftViewContext = {
+    getMiners: () => Promise<{address: string, pubkey: string}[]>;
+    isMiner: (address: string) => Promise<boolean>;
+} & ValueViewContext;
+
 export class ChainClient {
     constructor(options: {host: string, port: number, logger: LoggerInstance});
 
-    getPeers():Promise<string[]>;
-    
     getBlock(params: {which: string|number|'lastest', transactions?: boolean}): Promise<{err: ErrorCode, block?: any}>;
 
     getTransactionReceipt(params: {tx: string}): Promise<{err: ErrorCode, block?: any, tx?: any, receipt?: any}>;
@@ -276,11 +278,11 @@ export class BaseHandler {
 
     addPreBlockListener(filter: BlockHeigthFilter, listener: BlockHeightListener): void;
 
-    getPreBlockListeners(h: number): Promise<BlockHeightListener[]>;
+    getPreBlockListeners(): {index: number, listener: BlockHeightListener}[];
 
     addPostBlockListener(filter: BlockHeigthFilter, listener: BlockHeightListener): void;
 
-    getPostBlockListeners(h: number): Promise<BlockHeightListener[]>;
+    getPostBlockListeners(h: number): {index: number, listener: BlockHeightListener}[];
 }
 
 
@@ -302,9 +304,9 @@ export class ValueIndependDebugSession {
         coinbase: number,
         interval: number,
         preBalance?: BigNumber
-    }): Promise<ErrorCode>;
+    }): Promise<{err: ErrorCode}>;
 
-    updateHeightTo(height: number, coinbase: number, events?: boolean): ErrorCode;
+    updateHeightTo(height: number, coinbase: number, events?: boolean): {err: ErrorCode};
 
     transaction(options: {caller: number|Buffer, method: string, input: any, value: BigNumber, fee: BigNumber, nonce?: number}): Promise<{err: ErrorCode, receipt?: Receipt}>;
     wage(): Promise<{err: ErrorCode}>;
@@ -332,14 +334,3 @@ export function toWei(value: string | number | BigNumber): BigNumber;
 export function fromWei(value: string | number | BigNumber): BigNumber;
 export function toCoin(value: string | number | BigNumber): BigNumber;
 export function fromCoin(value: string | number | BigNumber): BigNumber;
-
-export function MapToObject( input: Map<string, any> ): any;
-
-// Added by Yang Jun 2018-11-29, for wallet.ts
-export type Options = Map<string, any>;
-
-export type Command = { command?: string, options: Options };
-export function parseCommand(argv: string[]): Command | undefined;
-export function initUnhandledRejection(logger: LoggerInstance): void;
-
-export function MapFromObject(input: any): Map<string, any>;

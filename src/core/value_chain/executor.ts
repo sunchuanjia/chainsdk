@@ -2,7 +2,7 @@ import {BigNumber} from 'bignumber.js';
 import {ErrorCode} from '../error_code';
 import {isValidAddress} from '../address';
 
-import {Transaction, BlockHeader, Receipt, BlockExecutor, TxListener, TransactionExecutor, Storage, IReadableKeyValue, IReadWritableKeyValue, Chain, TransactionExecuteflag} from '../chain';
+import {Transaction, BlockHeader, Receipt, BlockExecutor, TxListener, TransactionExecutor, Storage, IReadableKeyValue, IReadWritableKeyValue, Chain, TransactionExecuteflag, ReceiptSourceType} from '../chain';
 import {Context} from './context';
 import {ValueHandler} from './handler';
 import {ValueTransaction, ValueReceipt} from './transaction';
@@ -15,7 +15,7 @@ const assert = require('assert');
 
 export class ValueBlockExecutor extends BlockExecutor {
     protected _newTransactionExecutor(l: TxListener, tx: ValueTransaction): TransactionExecutor {
-        return new ValueTransactionExecutor(l, tx, this.m_logger);
+        return new ValueTransactionExecutor(this.m_handler as ValueHandler, l, tx, this.m_logger);
     }
 
     async executeMinerWageEvent(): Promise<ErrorCode> {
@@ -31,18 +31,18 @@ export class ValueBlockExecutor extends BlockExecutor {
         return await ve.issue(coinbase, wage);
     }
 
-    public async executePreBlockEvent(): Promise<ErrorCode> {
+    public async executePreBlockEvent(): Promise<{err: ErrorCode, receipt?: Receipt}> {
         const err = await this.executeMinerWageEvent();
         if (err) {
-            return err;
+            return {err};
         }
         return await super.executePreBlockEvent();
     }    
 }
 
 export class ValueTransactionExecutor extends TransactionExecutor {
-    constructor(listener: TxListener, tx: Transaction, logger: LoggerInstance) {
-        super(listener, tx, logger);
+    constructor(handler: ValueHandler, listener: TxListener, tx: Transaction, logger: LoggerInstance) {
+        super(handler, listener, tx, logger);
         this.m_totalCost = new BigNumber(0);
     }
 
@@ -95,11 +95,12 @@ export class ValueTransactionExecutor extends TransactionExecutor {
         let nToValue: BigNumber = (this.m_tx as ValueTransaction).value.plus(nFee);
 
         let receipt: ValueReceipt = new ValueReceipt(); 
+        receipt.setSource({sourceType: ReceiptSourceType.transaction, txHash: this.m_tx.hash}); 
         let ve = new Context(kvBalance);
         if ((await ve.getBalance(fromAddress)).lt(nToValue)) {
             this.m_logger.error(`methodexecutor failed for value not enough need ${nToValue.toString()} but ${(await ve.getBalance(fromAddress)).toString()} address=${this.m_tx.address}, hash=${this.m_tx.hash}`);
             receipt.returnCode = ErrorCode.RESULT_NOT_ENOUGH;
-            receipt.transactionHash = this.m_tx.hash; 
+            
             return {err: ErrorCode.RESULT_OK, receipt};
         }
         
@@ -123,7 +124,6 @@ export class ValueTransactionExecutor extends TransactionExecutor {
             this.m_logger.error(`methodexecutor failed for invalid handler return code type, return=${receipt.returnCode},address=${this.m_tx.address}, hash=${this.m_tx.hash}`);
             return {err: ErrorCode.RESULT_INVALID_PARAM};
         }
-        receipt.transactionHash = this.m_tx.hash;
         if (receipt.returnCode) {
             await work.value!.rollback();
         } else {

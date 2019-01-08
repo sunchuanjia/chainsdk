@@ -72,7 +72,7 @@ export class DbftMiner extends ValueMiner {
 
     protected async _createBlock(header: DbftBlockHeader): Promise<{err: ErrorCode, block?: Block}> {
         const block = this.chain.newBlock(header);
-        this.pushTx(block);
+        this._collectTransactions(block);
         await this._decorateBlock(block);
         const cer = await this._createExecuteRoutine(block);
         if (cer.err) {

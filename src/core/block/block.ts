@@ -1,5 +1,6 @@
 
-import { Receipt, Transaction } from './transaction';
+import {isString} from 'util';
+import { Receipt, Transaction, ReceiptSourceType, EventLog } from './transaction';
 import { Serializable, BufferReader, BufferWriter, SerializableWithHash } from '../serializable';
 import { ErrorCode } from '../error_code';
 import * as merkle from '../lib/merkle';
@@ -87,12 +88,12 @@ export class BlockHeader extends SerializableWithHash {
         return root.toString('hex');
     }
 
-    private _genReceiptHash(receipts: Map<string, Receipt>): string {
-        if (!receipts.size) {
+    private _genReceiptHash(receipts: Array<Receipt>): string {
+        if (!receipts.length) {
             return Encoding.NULL_HASH;
         }
         let writer = new BufferWriter();
-        for (const [tx, receipt] of receipts.entries()) {
+        for (const receipt of receipts) {
             receipt.encode(writer);
         }
         return digest.hash256(writer.render()).toString('hex');
@@ -166,7 +167,10 @@ export class BlockHeader extends SerializableWithHash {
 export class BlockContent implements Serializable {
     constructor(transactionType: new () => Transaction, receiptType: new () => Receipt) {
         this.m_transactions = new Array();
-        this.m_receipts = new Map<string, Receipt>();
+        this.m_preBlockEventReceipts = new Array<Receipt>();
+        this.m_txReceipts = new Map<string, Receipt>();
+        this.m_postBlockEventReceipts = new Array<Receipt>();
+        this.m_receipts = new Array();
         this.m_transactionType = transactionType;
         this.m_receiptType = receiptType;
     }
@@ -174,16 +178,42 @@ export class BlockContent implements Serializable {
     private m_transactionType: new () => Transaction;
     private m_receiptType: new () => Receipt;
     private m_transactions: Transaction[];
-    private m_receipts: Map<string, Receipt>;
+    private m_preBlockEventReceipts: Receipt[];
+    private m_txReceipts: Map<string, Receipt>;
+    private m_postBlockEventReceipts: Receipt[];
+    private m_receipts: Receipt[];
 
     get transactions(): Transaction[] {
         const t = this.m_transactions;
         return t;
     }
 
-    get receipts(): Map<string, Receipt> {
+    get receipts(): Array<Receipt> {
         const r = this.m_receipts;
         return r;
+    }
+
+    get preBlockEventReceipts(): Array<Receipt> {
+        const r = this.m_preBlockEventReceipts;
+        return r;
+    }
+
+    get transactionReceipts(): Map<string, Receipt> {
+        const r = this.m_txReceipts;
+        return r;
+    }
+
+    get postBlockEventReceipts(): Array<Receipt> {
+        const r = this.m_postBlockEventReceipts;
+        return r;
+    }
+
+    get eventLogs(): Array<EventLog> {
+        let logs = [];
+        for (let r of this.m_receipts) {
+            logs.push(...r.eventLogs);
+        }
+        return logs;
     }
 
     public hasTransaction(txHash: string): boolean {
@@ -210,23 +240,51 @@ export class BlockContent implements Serializable {
         return null;
     }
 
-    public getReceipt(txHash: string): Receipt | undefined {
-        return this.m_receipts.get(txHash);
+    public getReceipt(options: string | {sourceType: ReceiptSourceType.preBlockEvent | ReceiptSourceType.postBlockEvent, eventIndex: number}): Receipt | undefined {
+        if (isString(options)) {
+            return this.m_txReceipts.get(options);
+        } else {
+            if (options.sourceType === ReceiptSourceType.preBlockEvent) {
+                return this.m_preBlockEventReceipts[options.eventIndex];
+            } else if (options.sourceType === ReceiptSourceType.postBlockEvent) {
+                return this.m_postBlockEventReceipts[options.eventIndex];
+            } else {
+                assert(false, `invalid receipt source type ${options.sourceType}`);
+                return undefined;
+            }
+        }
     }
 
     public addTransaction(tx: Transaction) {
         this.m_transactions.push(tx);
     }
 
-    public addReceipt(receipt: Receipt) {
-        this.m_receipts.set(receipt.transactionHash, receipt);
-    }
-
     public setReceipts(receipts: Receipt[]) {
-        this.m_receipts.clear();
+        let txReceipts = new Map();
+        let txReceiptsArr = [];
+        let preBlockEventReceipts = [];
+        let postBlockEventReceipts = [];
         for (let r of receipts) {
-            this.m_receipts.set(r.transactionHash, r);
+            if (r.sourceType === ReceiptSourceType.transaction) {
+                txReceipts.set(r.transactionHash, r);
+                txReceiptsArr.push(r);
+            } else if (r.sourceType === ReceiptSourceType.preBlockEvent) {
+                preBlockEventReceipts.push(r);
+            } else if (r.sourceType === ReceiptSourceType.postBlockEvent) {
+                postBlockEventReceipts.push(r);
+            } else {
+                assert(false, `invalid receipt source type ${r.sourceType}`);
+                return ;
+            }
         }
+        this.m_txReceipts = txReceipts;
+        this.m_preBlockEventReceipts = preBlockEventReceipts;
+        this.m_postBlockEventReceipts = postBlockEventReceipts;
+        let _receipts: Receipt[] = [];
+        _receipts.push(...preBlockEventReceipts);
+        _receipts.push(...txReceiptsArr);
+        _receipts.push(...postBlockEventReceipts);
+        this.m_receipts = _receipts;
     }
 
     public encode(writer: BufferWriter): ErrorCode {
@@ -238,11 +296,29 @@ export class BlockContent implements Serializable {
                     return err;
                 }
             }
-            if (this.m_transactions.length && this.m_receipts.size) {
-                writer.writeU16(this.m_transactions.length);
+            const receiptLength = this.m_txReceipts.size 
+                                + this.m_preBlockEventReceipts.length
+                                + this.m_postBlockEventReceipts.length;
+            if (receiptLength) {
+                if (this.m_txReceipts.size !== this.m_transactions.length) {
+                    return ErrorCode.RESULT_INVALID_BLOCK;
+                }
+                writer.writeU16(receiptLength);
                 for (let tx of this.m_transactions) {
-                    let r = this.m_receipts.get(tx.hash);
+                    let r = this.m_txReceipts.get(tx.hash);
                     assert(r);
+                    const err = r!.encode(writer);
+                    if (err) {
+                        return err;
+                    }
+                }
+                for (let r of this.m_preBlockEventReceipts) {
+                    const err = r!.encode(writer);
+                    if (err) {
+                        return err;
+                    }
+                }
+                for (let r of this.m_postBlockEventReceipts) {
                     const err = r!.encode(writer);
                     if (err) {
                         return err;
@@ -260,7 +336,7 @@ export class BlockContent implements Serializable {
 
     public decode(reader: BufferReader): ErrorCode {
         this.m_transactions = [];
-        this.m_receipts = new Map();
+        this.m_txReceipts = new Map();
         
         let txCount: number;
         try {
@@ -279,14 +355,27 @@ export class BlockContent implements Serializable {
         }
 
         const rs = reader.readU16();
-        for (let ix = 0; ix < rs; ++ix) {
-            let receipt = new this.m_receiptType();
-            const err = receipt.decode(reader);
-            if (err !== ErrorCode.RESULT_OK) {
-                return err;
+        let receipts = [];
+        if (rs) {
+            for (let ix = 0; ix < txCount; ++ix) {
+                let receipt = new this.m_receiptType();
+                const err = receipt.decode(reader);
+                if (err !== ErrorCode.RESULT_OK) {
+                    return err;
+                }
+                receipts.push(receipt);
             }
-            this.m_receipts.set(receipt.transactionHash, receipt);
+            for (let ix = 0; ix < rs - txCount; ++ix) {
+                let receipt = new Receipt();
+                const err = receipt.decode(reader);
+                if (err !== ErrorCode.RESULT_OK) {
+                    return err;
+                }
+                receipts.push(receipt);
+            }
         }
+        
+        this.setReceipts(receipts);
         return ErrorCode.RESULT_OK;
     }
 }

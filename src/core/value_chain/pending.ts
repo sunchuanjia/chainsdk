@@ -8,8 +8,8 @@ import {ValueBlockHeader} from './block';
 export class ValuePendingTransactions extends PendingTransactions {
     protected m_balance: Map<string, BigNumber> = new Map<string, BigNumber>();
 
-    protected async onCheck(txTime: TransactionWithTime,  txOld?: TransactionWithTime): Promise<ErrorCode> {
-        let ret = await super.onCheck(txTime, txOld);
+    protected async _onCheck(txTime: TransactionWithTime,  txOld?: TransactionWithTime): Promise<ErrorCode> {
+        let ret = await super._onCheck(txTime, txOld);
         if (ret) {
             return ret;
         }
@@ -31,7 +31,7 @@ export class ValuePendingTransactions extends PendingTransactions {
         }
         return ErrorCode.RESULT_OK;
     }
-    protected async onAddedTx(txTime: TransactionWithTime, txOld?: TransactionWithTime): Promise<ErrorCode> {
+    protected async _onAddedTx(txTime: TransactionWithTime, txOld?: TransactionWithTime): Promise<ErrorCode> {
         let br = await this.getBalance(txTime.tx.address as string);
         if (br.err) {
             return br.err;
@@ -46,7 +46,7 @@ export class ValuePendingTransactions extends PendingTransactions {
         }
         this.m_balance.set(txTime.tx.address as string, balance);
 
-        return await super.onAddedTx(txTime);
+        return await super._onAddedTx(txTime);
     }
 
     public async updateTipBlock(header: ValueBlockHeader): Promise<ErrorCode> {
@@ -87,7 +87,7 @@ export class ValuePendingTransactions extends PendingTransactions {
         return this.getStorageBalance(s);
     }
 
-    protected async checkSmallNonceTx(txNew: ValueTransaction, txOld: ValueTransaction): Promise<ErrorCode> {
+    protected async _checkSmallNonceTx(txNew: ValueTransaction, txOld: ValueTransaction): Promise<ErrorCode> {
         if (txNew.fee.gt(txOld.fee)) {
             return ErrorCode.RESULT_OK;
         }
@@ -95,7 +95,7 @@ export class ValuePendingTransactions extends PendingTransactions {
         return ErrorCode.RESULT_FEE_TOO_SMALL;
     }
 
-    protected addToQueue(txTime: TransactionWithTime, pos: number) {
+    protected _addToQueue(txTime: TransactionWithTime, pos: number) {
         pos = 0;
         for (let i = 0; i < this.m_transactions.length; i++) {
             if (this.m_transactions[i].tx.address === txTime.tx.address) {

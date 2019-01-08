@@ -60,13 +60,13 @@ export class StorageDumpSnapshotManager implements IStorageSnapshotManager {
     }
 
     public releaseSnapshot(blockHash: string): void {
-
+        
     }
 
     public removeSnapshot(blockHash: string): ErrorCode {
         const snapshot = new StorageDumpSnapshot(blockHash, this.getSnapshotFilePath(blockHash));
         try {
-            fs.removeSync(snapshot.filePath);
+            fs.unlinkSync(snapshot.filePath);
         } catch (e) {
             this.m_logger.error(`removeSnapshot ${blockHash} `, e);
             return ErrorCode.RESULT_EXCEPTION;

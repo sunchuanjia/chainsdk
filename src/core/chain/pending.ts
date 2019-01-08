@@ -47,10 +47,10 @@ export class PendingTransactions extends EventEmitter {
     constructor(options: {
         storageManager: StorageManager,
         logger: LoggerInstance,
-        txlivetime: number,
+        overtime: number,
         handler: BaseHandler,
-        maxPengdingCount: number,
-        warnPendingCount: number
+        maxCount: number,
+        warnCount: number
     }) {
         super();
         this.m_transactions = [];
@@ -58,10 +58,10 @@ export class PendingTransactions extends EventEmitter {
         this.m_mapNonce = new Map<string, number>();
         this.m_logger = options.logger;
         this.m_storageManager = options.storageManager;
-        this.m_txLiveTime = options.txlivetime;
+        this.m_txLiveTime = options.overtime;
         this.m_handler = options.handler;
-        this.m_maxPengdingCount = options.maxPengdingCount;
-        this.m_warnPendingCount = options.warnPendingCount;
+        this.m_maxPengdingCount = options.maxCount;
+        this.m_warnPendingCount = options.warnCount;
         this.m_txRecord = new LRUCache(this.m_maxPengdingCount);
     }
 
@@ -78,7 +78,7 @@ export class PendingTransactions extends EventEmitter {
             return ErrorCode.RESULT_TX_CHECKER_ERROR;
         }
 
-        let nCount: number = this.getPengdingCount() + this.m_queueOpt.length;
+        let nCount: number = this._getPendingCount() + this.m_queueOpt.length;
         if (nCount >= this.m_maxPengdingCount) {
             this.m_logger.warn(`pengding count ${nCount}, maxPengdingCount ${this.m_maxPengdingCount}`);
             return ErrorCode.RESULT_OUT_OF_MEMORY;
@@ -91,13 +91,13 @@ export class PendingTransactions extends EventEmitter {
         }
         this.m_txRecord.set(tx.hash, Date.now());
 
-        if (this.isExist(tx)) {
+        if (this._isExist(tx)) {
             this.m_logger.warn(`addTransaction failed, tx exist,hash=${tx.hash}`);
             return ErrorCode.RESULT_TX_EXIST;
         }
         
         let opt: SyncOpt = {_type: SyncOptType.addTx, param: {tx, ct: Date.now()}};
-        this.addPendingOpt(opt);
+        this._addPendingOpt(opt);
         return ErrorCode.RESULT_OK;
     }
 
@@ -121,7 +121,7 @@ export class PendingTransactions extends EventEmitter {
         this.m_curHeader = header;
         this.m_storageView = svr.storage!;
 
-        this.addPendingOpt({_type: SyncOptType.updateTip, param: undefined});
+        this._addPendingOpt({_type: SyncOptType.updateTip, param: undefined});
         return ErrorCode.RESULT_OK;
     }
 
@@ -138,7 +138,7 @@ export class PendingTransactions extends EventEmitter {
         this.m_mapNonce.clear();
     }
 
-    protected isExist(tx: Transaction): boolean {
+    protected _isExist(tx: Transaction): boolean {
         for (let t of this.m_transactions) {
             if (t.tx.hash === tx.hash) {
                 return true;
@@ -157,7 +157,7 @@ export class PendingTransactions extends EventEmitter {
         return false;
     }
 
-    protected async addPendingOpt(opt: SyncOpt) {
+    protected async _addPendingOpt(opt: SyncOpt) {
         if (opt._type === SyncOptType.updateTip) {
             for (let i = 0; i < this.m_queueOpt.length; i++) {
                 if (this.m_queueOpt[i]._type === SyncOptType.addTx) {
@@ -197,11 +197,11 @@ export class PendingTransactions extends EventEmitter {
         }
     }
 
-    protected async onCheck(txTime: TransactionWithTime,  txOld?: TransactionWithTime): Promise<ErrorCode> {
+    protected async _onCheck(txTime: TransactionWithTime,  txOld?: TransactionWithTime): Promise<ErrorCode> {
         return ErrorCode.RESULT_OK;
     }
 
-    protected async onAddedTx(txTime: TransactionWithTime, txOld?: TransactionWithTime): Promise<ErrorCode> {
+    protected async _onAddedTx(txTime: TransactionWithTime, txOld?: TransactionWithTime): Promise<ErrorCode> {
         if (!txOld) {
             this.m_mapNonce.set(txTime.tx.address as string, txTime.tx.nonce);
         }
@@ -210,7 +210,7 @@ export class PendingTransactions extends EventEmitter {
     }
 
     protected async _addTx(txTime: TransactionWithTime): Promise<ErrorCode> {
-        if (this.isTimeout(txTime)) {
+        if (this._isTimeout(txTime)) {
             this.m_logger.warn(`_addTx tx timeout, txhash=${txTime.tx.hash}`);
             return ErrorCode.RESULT_TIMEOUT;
         }
@@ -228,25 +228,25 @@ export class PendingTransactions extends EventEmitter {
         let { err, nonce } = await this.getNonce(address);
         this.m_logger.debug(`_addTx, nonce=${nonce}, txNonce=${txTime.tx.nonce}, txhash=${txTime.tx.hash}, address=${txTime.tx.address}`);
         if (nonce! + 1 === txTime.tx.nonce) {
-            let retCode = await this.onCheck(txTime);
+            let retCode = await this._onCheck(txTime);
             if (retCode) {
                 return retCode;
             }
-            this.addToQueue(txTime, -1);
-            await this.onAddedTx(txTime);
-            await this.ScanOrphan(address);
+            this._addToQueue(txTime, -1);
+            await this._onAddedTx(txTime);
+            await this._scanOrphan(address);
             return ErrorCode.RESULT_OK;   
         }
 
         if (nonce! + 1 < txTime.tx.nonce) {
-            return await this.addToOrphanMayNonceExist(txTime);
+            return await this._addToOrphanMayNonceExist(txTime);
         }
 
-        return await this.addToQueueMayNonceExist(txTime);
+        return await this._addToQueueMayNonceExist(txTime);
     }
 
     // 同个address的两个相同nonce的tx存在，且先前的也还没有入链
-    protected async checkSmallNonceTx(txNew: Transaction, txOld: Transaction): Promise<ErrorCode> {
+    protected async _checkSmallNonceTx(txNew: Transaction, txOld: Transaction): Promise<ErrorCode> {
         return ErrorCode.RESULT_ERROR_NONCE_IN_TX;
     }
 
@@ -285,7 +285,7 @@ export class PendingTransactions extends EventEmitter {
         }
     }
 
-    protected addToOrphan(txTime: TransactionWithTime) {
+    protected _addToOrphan(txTime: TransactionWithTime) {
         let s: string = txTime.tx.address as string;
         let l: TransactionWithTime[];
         if (this.m_orphanTx.has(s)) {
@@ -307,7 +307,7 @@ export class PendingTransactions extends EventEmitter {
         }
     }
 
-    protected async ScanOrphan(s: string) {
+    protected async _scanOrphan(s: string) {
         if (!this.m_orphanTx.has(s)) {
             return;
         }
@@ -321,24 +321,24 @@ export class PendingTransactions extends EventEmitter {
                 break;
             }
 
-            if (this.isTimeout(l[0])) {
+            if (this._isTimeout(l[0])) {
                 l.shift();
                 continue;
             }
 
             if (nonce! + 1 === l[0].tx.nonce) {
                 let txTime: TransactionWithTime = l.shift() as TransactionWithTime;
-                this.addPendingOpt({_type: SyncOptType.addTx, param: txTime});
+                this._addPendingOpt({_type: SyncOptType.addTx, param: txTime});
             }
             break;
         }
     }
 
-    protected isTimeout(txTime: TransactionWithTime): boolean {
+    protected _isTimeout(txTime: TransactionWithTime): boolean {
         return Date.now() >= txTime.ct + this.m_txLiveTime * 1000;
     }
 
-    protected addToQueue(txTime: TransactionWithTime, pos: number) {
+    protected _addToQueue(txTime: TransactionWithTime, pos: number) {
         if (pos === -1) {
             this.m_transactions.push(txTime);
         } else {
@@ -346,7 +346,7 @@ export class PendingTransactions extends EventEmitter {
         }
     }
 
-    protected getPengdingCount(): number {
+    protected _getPendingCount(): number {
         let count = this.m_transactions.length;
         for (let [address, l] of this.m_orphanTx) {
             count += l.length;
@@ -354,30 +354,30 @@ export class PendingTransactions extends EventEmitter {
         return count;
     }
 
-    protected async addToQueueMayNonceExist(txTime: TransactionWithTime): Promise<ErrorCode> {
+    protected async _addToQueueMayNonceExist(txTime: TransactionWithTime): Promise<ErrorCode> {
         for (let i = 0; i < this.m_transactions.length; i++) {
             if (this.m_transactions[i].tx.address === txTime.tx.address && this.m_transactions[i].tx.nonce === txTime.tx.nonce) {
                 let txOld: TransactionWithTime = this.m_transactions[i];
-                if (this.isTimeout(this.m_transactions[i])) {
-                    let retCode = await this.onCheck(txTime, txOld);
+                if (this._isTimeout(this.m_transactions[i])) {
+                    let retCode = await this._onCheck(txTime, txOld);
                     if (retCode) {
                         return retCode;
                     }
                     this.m_transactions.splice(i, 1);
-                    this.addToQueue(txTime, i);
-                    await this.onAddedTx(txTime, txOld);
+                    this._addToQueue(txTime, i);
+                    await this._onAddedTx(txTime, txOld);
                     return ErrorCode.RESULT_OK;
                 }
 
-                let _err = await this.checkSmallNonceTx(txTime.tx, this.m_transactions[i].tx);
+                let _err = await this._checkSmallNonceTx(txTime.tx, this.m_transactions[i].tx);
                 if (_err === ErrorCode.RESULT_OK) {
-                    let retCode = await this.onCheck(txTime, txOld);
+                    let retCode = await this._onCheck(txTime, txOld);
                     if (retCode) {
                         return retCode;
                     }
                     this.m_transactions.splice(i, 1);
-                    this.addToQueue(txTime, i);
-                    await this.onAddedTx(txTime, txOld);
+                    this._addToQueue(txTime, i);
+                    await this._onAddedTx(txTime, txOld);
                     return ErrorCode.RESULT_OK;
                 }
                 return _err;
@@ -385,7 +385,7 @@ export class PendingTransactions extends EventEmitter {
         }
         return ErrorCode.RESULT_ERROR_NONCE_IN_TX;
     }
-    protected async addToOrphanMayNonceExist(txTime: TransactionWithTime): Promise<ErrorCode> {
+    protected async _addToOrphanMayNonceExist(txTime: TransactionWithTime): Promise<ErrorCode> {
         let s: string = txTime.tx.address as string;
         let l: TransactionWithTime[];
         if (this.m_orphanTx.has(s)) {
@@ -401,12 +401,12 @@ export class PendingTransactions extends EventEmitter {
         for (let i = 0; i < l.length; i++) {
             if (txTime.tx.nonce === l[i].tx.nonce) {
                 let txOld: Transaction = l[i].tx;
-                if (this.isTimeout(l[i])) {
+                if (this._isTimeout(l[i])) {
                     l.splice(i, 1, txTime);
                     return ErrorCode.RESULT_OK;
                 }
 
-                let _err = await this.checkSmallNonceTx(txTime.tx, l[i].tx);
+                let _err = await this._checkSmallNonceTx(txTime.tx, l[i].tx);
                 if (_err === ErrorCode.RESULT_OK) {
                     l.splice(i, 1, txTime);
                     return ErrorCode.RESULT_OK;

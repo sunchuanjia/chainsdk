@@ -190,6 +190,10 @@ export class StorageManager {
         return this.m_snapshotManager.hasRedoLog(blockHash);
     }
 
+    public addRedoLog(blockHash: string, log: StorageLogger): ErrorCode  {
+        return this.m_snapshotManager.writeRedoLog(blockHash, log);
+    }
+
     public async releaseSnapshotView(blockHash: string): Promise<void> {
         let stub = this.m_views.get(blockHash);
         if (stub) {
@@ -203,7 +207,7 @@ export class StorageManager {
         }
     }
 
-    public recycleSnapShot() {
+    public recycleSnapshot() {
         return this.m_snapshotManager.recycle();
     }
 }

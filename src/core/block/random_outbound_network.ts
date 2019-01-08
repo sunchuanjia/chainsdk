@@ -57,7 +57,7 @@ export class RandomOutNetwork extends Network {
             return ErrorCode.RESULT_SKIPPED;
         }
         let err = await this._newOutbounds(this.m_minOutbound!);
-        if (err) {
+        if (err && err !== ErrorCode.RESULT_SKIPPED) {
             return err;
         }
         this.m_checkOutboundTimer = setInterval(() => {
@@ -73,11 +73,9 @@ export class RandomOutNetwork extends Network {
     protected async _newOutbounds(count: number, callback?: (count: number) => void): Promise<ErrorCode> {
         let peerids: string[] = this.m_nodeStorage!.get('all');
         let willConn = new Set();
-        for (let pid of peerids) {
-            if (this._onWillConnectTo(pid)) {
-                willConn.add(pid);
-            }
-        }
+        peerids.forEach((pid) => {
+            willConn.add(pid); 
+        });
         this.logger.debug(`will connect to peers from node storage: `, willConn);
         if (willConn.size < count) {
             let excludes: string[] = [];
@@ -106,11 +104,9 @@ export class RandomOutNetwork extends Network {
                     willConn.add(pid);
                 }
             } else if (result.err === ErrorCode.RESULT_SKIPPED) {
-                this.logger.debug(`cannot find any peers, ignore connect.`);
-                return ErrorCode.RESULT_SKIPPED;
+                this.logger.debug(`cannot find any new peers from randomPeers`);
             } else {
                 this.logger.error(`random peers failed for : `, result.err);
-                return result.err;
             }
         }
         

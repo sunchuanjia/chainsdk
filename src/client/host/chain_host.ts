@@ -4,13 +4,25 @@ import * as fs from 'fs-extra';
 
 import {Options as CommandOptions} from '../lib/simple_command';
 
-import {INode, initChainCreator, initLogger, Chain, Miner, IBlockExecutorRoutineManager, InprocessRoutineManager, InterprocessRoutineManager} from '../../core';
-
+import {INode, initChainCreator, initLogger, Chain, Miner, IBlockExecutorRoutineManager, InprocessRoutineManager, InterprocessRoutineManager, ErrorCode} from '../../core';
+import {ChainEventServer} from '../event/server';
 import {ChainServer} from './rpc';
 
 export class ChainHost {
     constructor() {
         
+    }
+
+    protected async _initEventServer(options: {chain: Chain, commandOptions: CommandOptions}): Promise<{err: ErrorCode, server?: ChainEventServer}> {
+        if (!options.commandOptions.has('eventsServer')) {
+            return {err: ErrorCode.RESULT_OK};
+        }
+        let server = new ChainEventServer({chain: options.chain});
+        const err = await server.init({});
+        if (err) {
+            return {err};
+        }
+        return {err: ErrorCode.RESULT_OK, server};
     }
 
     public async initMiner(commandOptions: CommandOptions): Promise<{ret: boolean, miner?: Miner}> {
@@ -26,7 +38,6 @@ export class ChainHost {
             console.error('chain_host initMiner fail createMinerInstance');
             return {ret: false};
         }
-        
         let routineManagerType = this._parseExecutorRoutine(cr.miner!.chain, commandOptions);
         if (!routineManagerType) {
             console.error('chain_host initMiner fail _parseExecutorRoutine');
@@ -40,6 +51,11 @@ export class ChainHost {
         let err = await cr.miner!.initialize(pr.value!);
         if (err) {
             console.error('chain_host initMiner fail initialize');
+            return {ret: false};
+        }
+        const iesr = await this._initEventServer({chain: cr.miner!.chain, commandOptions});
+        if (iesr.err) {
+            console.error('init events server fail parseInstanceOptions');
             return {ret: false};
         }
         this.m_server = new ChainServer(logger, cr.miner!.chain!, cr.miner!);
@@ -70,6 +86,11 @@ export class ChainHost {
         }
         let err = await cr.chain!.initialize(pr.value!);
         if (err) {
+            return {ret: false};
+        }
+        const iesr = await this._initEventServer({chain: cr.chain!, commandOptions});
+        if (iesr.err) {
+            console.error('init events server fail parseInstanceOptions');
             return {ret: false};
         }
         this.m_server = new ChainServer(logger, cr.chain!);

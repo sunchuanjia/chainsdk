@@ -1,6 +1,6 @@
 {
   "name": "blockchain-sdk",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "",
   "directories": {
     "doc": "doc"
@@ -13,13 +13,13 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://git.tinyappcloud.com/lzc/chainSDK"
+    "url": "https://"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "bdt-p2p": "0.1.235",
+    "bdt-p2p": "^0.1.238",
     "bignumber.js": "^6.0.0",
     "bn.js": "^4.11.8",
     "fs-extra": "^5.0.0",

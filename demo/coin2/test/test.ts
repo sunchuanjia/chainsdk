@@ -18,7 +18,8 @@ describe('coin', () => {
             assert(!mdr.err, 'createValueMemoryDebuger failed', stringifyErrorCode(mdr.err));
             const debuger = mdr.debuger!;
             session = debuger.createIndependSession();
-            assert(!(await session.init({height: 0, accounts: 2, coinbase: 0, interval: 10})), 'init session failed');
+            const sir = await session.init({height: 0, accounts: 2, coinbase: 0, interval: 10});
+            assert(!sir.err, 'init session failed');
         }
         __test().then(done);
     });

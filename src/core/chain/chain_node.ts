@@ -5,7 +5,7 @@ import {ErrorCode} from '../error_code';
 import {LoggerInstance, } from '../lib/logger_util';
 import { StorageManager, StorageLogger, StorageDumpSnapshot, JStorageLogger } from '../storage';
 
-import {Transaction, BlockHeader, Block, BlockStorage, Network, BAN_LEVEL} from '../block';
+import {Transaction, BlockHeader, Block, BlockStorage, Network, BAN_LEVEL, NetworkBroadcastStrategy} from '../block';
 
 import { BufferReader } from '../lib/reader';
 import { BufferWriter } from '../lib/writer';
@@ -102,25 +102,27 @@ export class ChainNode extends EventEmitter {
     public async init(): Promise<ErrorCode> {
         let inits = [];
 
-        for (const node of this.m_networks) {
-            node.on('inbound', (conn: NodeConnection) => {
-                this._beginSyncWithNode(node, conn);
+        for (const network of this.m_networks) {
+            network.on('inbound', (conn: NodeConnection) => {
+                this._beginSyncWithNode(network, conn);
                 this.emit('inbound', conn);
             });
-            node.on('outbound', (conn: NodeConnection) => {
-                this._beginSyncWithNode(node, conn);
+            network.on('outbound', (conn: NodeConnection) => {
+                this._beginSyncWithNode(network, conn);
                 this.emit('outbound', conn);
             });
-            node.on('error', (remote: string, err: ErrorCode) => {
-                this._onConnectionError(remote);
-                this.emit('error', INode.fullPeerid(node.name, remote));
+            network.on('error', (remote: string, err: ErrorCode) => {
+                const fullRemote = INode.fullPeerid(network.name, remote);
+                this._onConnectionError(fullRemote);
+                this.emit('error', fullRemote);
             });
-            node.on('ban', (remote: string) => {
-                this._onRemoveConnection(remote);
-                this.emit('ban', INode.fullPeerid(node.name, remote));
+            network.on('ban', (remote: string) => {
+                const fullRemote = INode.fullPeerid(network.name, remote);
+                this._onRemoveConnection(fullRemote);
+                this.emit('ban', fullRemote);
             });
             
-            inits.push(node.init());
+            inits.push(network.init());
         }
         let results = await Promise.all(inits);
         if (results[0]) {
@@ -128,8 +130,8 @@ export class ChainNode extends EventEmitter {
         }
 
         let initOutbounds = [];
-        for (const node of this.m_networks) {
-            initOutbounds.push(node.initialOutbounds());
+        for (const network of this.m_networks) {
+            initOutbounds.push(network.initialOutbounds());
         }
 
         results = await Promise.all(initOutbounds);
@@ -141,8 +143,8 @@ export class ChainNode extends EventEmitter {
         this.removeAllListeners('headers');
         this.removeAllListeners('transactions');
         let uninits = [];
-        for (const node of this.m_networks) {
-            uninits.push(node.uninit());
+        for (const network of this.m_networks) {
+            uninits.push(network.uninit());
         }
         return Promise.all(uninits);
     }
@@ -153,8 +155,8 @@ export class ChainNode extends EventEmitter {
 
     public async listen(): Promise<ErrorCode> {
         let listens = [];
-        for (const node of this.m_networks) {
-            listens.push(node.listen());
+        for (const network of this.m_networks) {
+            listens.push(network.listen());
         }
         const results = await Promise.all(listens);
         for (const err of results) {
@@ -165,11 +167,11 @@ export class ChainNode extends EventEmitter {
         return ErrorCode.RESULT_OK;
     }
 
-    public getNetwork(network?: string): Network|undefined {
-        if (network) {
-            for (const node of this.m_networks) {
-                if (node.name === network) {
-                    return node;
+    public getNetwork(_network?: string): Network|undefined {
+        if (_network) {
+            for (const network of this.m_networks) {
+                if (network.name === _network) {
+                    return network;
                 }
             }
             return undefined;
@@ -189,8 +191,8 @@ export class ChainNode extends EventEmitter {
 
     public getOutbounds(): NodeConnection[] {
         let arr = [];
-        for (const node of this.m_networks) {
-            arr.push(...node.node.getOutbounds());
+        for (const network of this.m_networks) {
+            arr.push(...network.node.getOutbounds());
         }
         return arr;
     }
@@ -203,6 +205,7 @@ export class ChainNode extends EventEmitter {
             return ErrorCode.RESULT_OK;
         }
         let pwriter: PackageStreamWriter|undefined;
+        let strategy;
         if (content[0] instanceof BlockHeader) {
             let hwriter = new BufferWriter();
             for (let header of content) {
@@ -215,6 +218,7 @@ export class ChainNode extends EventEmitter {
             let raw = hwriter.render();
             pwriter = PackageStreamWriter.fromPackage(SYNC_CMD_TYPE.header, {count: content.length}, raw.length);
             pwriter.writeData(raw);
+            strategy = NetworkBroadcastStrategy.headers;
         } else if (content[0] instanceof Transaction) {
             let hwriter = new BufferWriter();
             for (let tx of content) {
@@ -227,10 +231,13 @@ export class ChainNode extends EventEmitter {
             let raw = hwriter.render();
             pwriter = PackageStreamWriter.fromPackage(SYNC_CMD_TYPE.tx, {count: content.length}, raw.length);
             pwriter.writeData(raw);
+            strategy = NetworkBroadcastStrategy.transaction;
         }
         assert(pwriter);
-        for (const node of this.m_networks) {
-            node.node.broadcast(pwriter!, options);
+        for (const network of this.m_networks) {
+            const opt = Object.create(options ? options : null);
+            opt.strategy = strategy;
+            network.broadcast(pwriter!, opt);
         }
         return ErrorCode.RESULT_OK;
     }
@@ -393,12 +400,13 @@ export class ChainNode extends EventEmitter {
             network.banConnection(conn.remote!, BAN_LEVEL.day); // 可能分叉？
             return;
         }
-        let err = this._onRecvBlock(block, conn.fullRemote);
+        const eventParams = {from: conn.fullRemote, block, redoLog};
+        let err = this._onRecvBlock(eventParams);
         if (err) {
             return ;
         }
         // 数据emit 到chain层
-        this.emit('blocks', {from: conn.fullRemote, block, redoLog});
+        this.emit('blocks', eventParams);
     }
 
     public requestHeaders(from: NodeConnection, options: {from?: string, limit?: number}): ErrorCode {
@@ -431,11 +439,17 @@ export class ChainNode extends EventEmitter {
                 assert(block, `block storage load block ${header.hash} failed while file exists`);
                 if (block) {
                     if (this.m_blockWithLog) {
-                        let redoLog = this.m_storageManager.getRedoLog(header.hash);
-                        if (redoLog) {
-                            setImmediate(() => {
-                                this.emit('blocks', {block, redoLog});
-                            });
+                        if (this.m_storageManager.hasRedoLog(header.hash)) {
+                            let redoLog = this.m_storageManager.getRedoLog(header.hash);
+                            if (redoLog) {
+                                setImmediate(() => {
+                                    this.emit('blocks', {block, redoLog});
+                                });
+                            } else {
+                                setImmediate(() => {
+                                    this.emit('blocks', {block});
+                                });
+                            }
                         } else {
                             setImmediate(() => {
                                 this.emit('blocks', {block});
@@ -475,10 +489,9 @@ export class ChainNode extends EventEmitter {
         }
         
         for (let hash of requests) {
-            if (!this._tryRequestBlockFromConnection(hash, connRequesting)) {
-                this._addToPendingBlocks(hash);
-            }
+            this._addToPendingBlocks(hash);
         }
+        this._onFreeBlockWnd(connRequesting);
         return ErrorCode.RESULT_OK;
     }
 
@@ -627,38 +640,41 @@ export class ChainNode extends EventEmitter {
         return valid;
     }
 
-    protected _onRecvBlock(block: Block, remote: string): ErrorCode {
-        let connRequesting = this.m_requestingBlock.connMap.get(remote);
+    protected _onRecvBlock(params: BlocksEventParams): ErrorCode {
+        let connRequesting = this.m_requestingBlock.connMap.get(params.from!);
         if (!connRequesting) {
-            this.logger.error(`requesting info on ${remote} missed, skip it`);
+            this.logger.error(`requesting info on ${params.from!} missed, skip it`);
             return ErrorCode.RESULT_NOT_FOUND;
         }
-        let stub = this.m_requestingBlock.hashMap.get(block.hash);
-        assert(stub, `recv block ${block.hash} from ${remote} that never request`);
+        let stub = this.m_requestingBlock.hashMap.get(params.block.hash);
+        assert(stub, `recv block ${params.block.hash} from ${params.from!} that never request`);
         if (!stub) {
-            this._banConnection(remote, BAN_LEVEL.day);
+            this._banConnection(params.from!, BAN_LEVEL.day);
             return ErrorCode.RESULT_INVALID_BLOCK;
         }
-        this.logger.debug(`recv block hash: ${block.hash} number: ${block.number} from ${remote}`);
-        this.m_blockStorage!.add(block);
-        assert(stub!.remote === remote, `request ${block.hash} from ${stub!.remote} while recv from ${remote}`);
-        this.m_requestingBlock.hashMap.delete(block.hash);
-        connRequesting.hashes.delete(block.hash);
-        this.m_blockFromMap.delete(block.hash);
-        this.m_cc.onRecvBlock(this, block, connRequesting);
+        this.logger.debug(`recv block hash: ${params.block.hash} number: ${params.block.number} from ${params.from!}`);
+        this.m_blockStorage!.add(params.block);
+        if (params.redoLog) {
+            this.m_storageManager.addRedoLog(params.block.hash, params.redoLog!);
+        }
+        assert(stub!.remote === params.from!, `request ${params.block.hash} from ${stub!.remote} while recv from ${params.from!}`);
+        this.m_requestingBlock.hashMap.delete(params.block.hash);
+        connRequesting.hashes.delete(params.block.hash);
+        this.m_blockFromMap.delete(params.block.hash);
+        this.m_cc.onRecvBlock(this, params.block, connRequesting);
         this._onFreeBlockWnd(connRequesting);
         return ErrorCode.RESULT_OK;
     }
 
-    protected _onConnectionError(remote: string) {
-        this.logger.warn(`connection from ${remote} break, close it.`);
-        this._onRemoveConnection(remote);
+    protected _onConnectionError(fullRemote: string) {
+        this.logger.warn(`connection from ${fullRemote} break, close it.`);
+        this._onRemoveConnection(fullRemote);
     }
 
     /*must not async*/
-    protected _onRemoveConnection(remote: string) {
-        this.logger.info(`removing ${remote} from block requesting source`);
-        let connRequesting = this.m_requestingBlock.connMap.get(remote);
+    protected _onRemoveConnection(fullRemote: string) {
+        this.logger.info(`removing ${fullRemote} from block requesting source`);
+        let connRequesting = this.m_requestingBlock.connMap.get(fullRemote);
         if (connRequesting) {
             for (let hash of connRequesting.hashes) { 
                 this.logger.debug(`change block ${hash} from requesting to pending`);
@@ -666,15 +682,14 @@ export class ChainNode extends EventEmitter {
                 this._addToPendingBlocks(hash, true);
             }
         }
-        this.m_requestingBlock.connMap.delete(remote);
-        const pendings = this.m_pendingBlock.sequence.slice(0);
-        for (let hash of pendings) {
+        this.m_requestingBlock.connMap.delete(fullRemote);
+        for (let hash of this.m_blockFromMap.keys()) {
             let sources = this.m_blockFromMap.get(hash)!;
-            if (sources.has(remote)) {
-                sources.delete(remote);
+            if (sources.has(fullRemote)) {
+                sources.delete(fullRemote);
                 if (!sources.size) {
                     this.logger.debug(`remove block ${hash} from pending blocks for all source removed`);
-                    this._removeFromPendingBlocks(hash);
+                    // this._removeFromPendingBlocks(hash);
                 } else {
                     for (let from of sources) {
                         let fromRequesting = this.m_requestingBlock.connMap.get(from);
@@ -686,15 +701,15 @@ export class ChainNode extends EventEmitter {
                 }
             }
         }
-        this.m_requestingHeaders.delete(remote);
+        this.m_requestingHeaders.delete(fullRemote);
     }
 
-    banConnection(remote: string, level: BAN_LEVEL) {
-        return this._banConnection(remote, level);
+    banConnection(fullRemote: string, level: BAN_LEVEL) {
+        return this._banConnection(fullRemote, level);
     }
 
-    protected _banConnection(remote: string, level: BAN_LEVEL) {
-        const {network, peerid} = INode.splitFullPeerid(remote)!;
+    protected _banConnection(fullRemote: string, level: BAN_LEVEL) {
+        const {network, peerid} = INode.splitFullPeerid(fullRemote)!;
         const node = this.getNetwork(network);
         if (node) {
             node.banConnection(peerid, level);
@@ -714,11 +729,11 @@ export class ChainNode extends EventEmitter {
             }
         }
         // 返回headers超时
-        for (let remote of this.m_requestingHeaders.keys()) {
-            let rh = this.m_requestingHeaders.get(remote)!;
+        for (let fullRemote of this.m_requestingHeaders.keys()) {
+            let rh = this.m_requestingHeaders.get(fullRemote)!;
             if (now - rh.time > this.m_headersTimeout) {
-                this.logger.debug(`header request timeout from ${remote} timeout with options `, rh.req);
-                this._banConnection(remote, BAN_LEVEL.hour);
+                this.logger.debug(`header request timeout from ${fullRemote} timeout with options `, rh.req);
+                this._banConnection(fullRemote, BAN_LEVEL.hour);
             }
         }
     }

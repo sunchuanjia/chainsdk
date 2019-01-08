@@ -1,7 +1,7 @@
 {
     "handler":"./handler.js",
     "type": {
-        "consensus":"dpos",
+        "consensus":"dposbft",
         "features":[]
     },
     "global": {

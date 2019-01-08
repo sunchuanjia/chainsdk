@@ -56,7 +56,7 @@ export class ValueMiner extends Miner {
             this.m_coinbase = options.coinbase;
         }
         this.m_feelimit = options.feelimit;
-        return super.initialize(options);
+        return await super.initialize(options);
     }
 
     protected async _decorateBlock(block: Block) {
@@ -64,10 +64,10 @@ export class ValueMiner extends Miner {
         return ErrorCode.RESULT_OK;
     }
 
-    protected pushTx(block: Block) {
+    protected _collectTransactions(block: Block) {
         let txs = (this.chain.pending as ValuePendingTransactions).popTransactionWithFee(this.m_feelimit);
-        while (txs.length > 0) {
-            block.content.addTransaction(txs.shift()!);
+        for (const tx of txs) {
+            block.content.addTransaction(tx);
         }
     }
 }

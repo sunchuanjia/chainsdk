@@ -98,8 +98,7 @@ function main() {
             let tx = new ValueTransaction();
             tx.method = 'register';
             tx.fee = new BigNumber(fee);
-            let signstr = sign(Buffer.from(md5(Buffer.from(_address, 'hex')).toString('hex')), secret).toString('hex');
-            tx.input = {address: _address, sign: signstr};
+            tx.input = {address: _address};
             let {err, nonce} = await chainClient.getNonce({address});
             if (err) {
                 console.error(`register failed for ${err}`);

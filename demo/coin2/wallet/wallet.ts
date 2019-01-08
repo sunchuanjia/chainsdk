@@ -2,7 +2,8 @@ import * as readline from 'readline';
 import * as process from 'process';
 import {ChainClient, BigNumber, ErrorCode, addressFromSecretKey, ValueTransaction, parseCommand, initUnhandledRejection, initLogger } from '../../../src/client';
 
-initUnhandledRejection(initLogger({loggerOptions: {console: true}}));
+const logger = initLogger({loggerOptions: {console: false}});
+initUnhandledRejection(logger);
 
 function main() {
     let command = parseCommand(process.argv);
@@ -29,7 +30,7 @@ function main() {
     let chainClient = new ChainClient({
         host,
         port,
-        logger: initLogger({loggerOptions: {console: true}})
+        logger
     });
 
     let watchingTx: string[] = [];
@@ -41,7 +42,7 @@ function main() {
                     console.error(`tx:${tx} failed for ${receipt.returnCode}`);
                     watchingTx.splice(watchingTx.indexOf(tx), 1);
                 } else {
-                    let confirm = block.number - tipBlock.number + 1;
+                    let confirm = tipBlock.number - block.number + 1;
                     if (confirm < 6) {
                         console.log(`tx:${tx} ${confirm} confirm`);
                     } else {

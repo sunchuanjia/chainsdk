@@ -1,8 +1,9 @@
 import * as readline from 'readline';
 import * as process from 'process';
-import {initLogger, ChainClient, BigNumber, addressFromSecretKey, ValueTransaction, parseCommand, initUnhandledRejection} from '../../../src/client';
+import {ChainClient, BigNumber, ErrorCode, addressFromSecretKey, ValueTransaction, parseCommand, initUnhandledRejection, initLogger } from '../../../src/client';
 
-initUnhandledRejection(initLogger({loggerOptions: {console: true}}));
+const logger = initLogger({loggerOptions: {console: false}});
+initUnhandledRejection(logger);
 
 function main() {
     let command = parseCommand(process.argv);
@@ -29,12 +30,11 @@ function main() {
     let chainClient = new ChainClient({
         host,
         port,
-        logger: initLogger({loggerOptions: {console: true}})
+        logger
     });
 
     let watchingTx: string[] = [];
     chainClient.on('tipBlock', async (tipBlock) => {
-        console.log(`client onTipBlock, height ${tipBlock.number}`);
         for (let tx of watchingTx.slice()) {
             let {err, block, receipt} = await chainClient.getTransactionReceipt({tx});
             if (!err) {
@@ -70,7 +70,7 @@ function main() {
                 console.error(`get balance failed for ${ret.err};`);
                 return ;
             }
-            console.log(`${_address}\`s Balance: ${ret.value!}`);
+            console.log(`${ret.value!}`);
         },
         transferTo: async (to: string, amount: string, fee: string) => {
             let tx = new ValueTransaction();
@@ -87,123 +87,31 @@ function main() {
             tx.sign(secret);
             let sendRet = await chainClient.sendTransaction({tx});
             if (sendRet.err) {
-                console.error(`transferTo failed for ${sendRet.err}`);
+                console.error(`transferTo failed for ${err}`);
                 return ;
             }
+            watchingTx.push(tx.hash);
             console.log(`send transferTo tx: ${tx.hash}`);
-            watchingTx.push(tx.hash);
-        },
-
-        register: async (_address: string, fee: string) => {
-            let tx = new ValueTransaction();
-            tx.method = 'register';
-            tx.fee = new BigNumber(fee);
-            tx.input = {address: _address};
-            let {err, nonce} = await chainClient.getNonce({address});
-            if (err) {
-                console.error(`register failed for ${err}`);
-                return ;
-            }
-            console.log(`=================${nonce}`);
-            tx.nonce = nonce! + 1;
-            tx.sign(secret);
-            let sendRet = await chainClient.sendTransaction({tx});
-            if (sendRet.err) {
-                console.error(`register failed for ${sendRet.err}`);
-                return ;
-            }
-            console.log(`send register tx: ${tx.hash}`);
-            watchingTx.push(tx.hash);
-        },
-
-        unregister: async (_address: string, fee: string) => {
-            let tx = new ValueTransaction();
-            tx.method = 'unregister';
-            tx.fee = new BigNumber(fee);
-            tx.input = {address: _address};
-            let {err, nonce} = await chainClient.getNonce({address});
-            if (err) {
-                console.error(`unregister failed for ${err}`);
-                return ;
-            }
-            tx.nonce = nonce! + 1;
-            tx.sign(secret);
-            let sendRet = await chainClient.sendTransaction({tx});
-            if (sendRet.err) {
-                console.error(`unregister failed for ${sendRet.err}`);
-                return ;
-            }
-            console.log(`send unregister tx: ${tx.hash}`);
-            watchingTx.push(tx.hash);
-        },
-
-        getMiners: async () => {
-            let ret = await chainClient.view({
-                method: 'getMiners',
-                params: {}
-            });
-            if (ret.err) {
-                console.error(`getMiners failed for ${ret.err};`);
-                return ;
-            }
-            console.log(`${JSON.stringify(ret.value!)}`);
-        },
-
-        isMiner: async (_address: string) => {
-            let ret = await chainClient.view({
-                method: 'isMiner',
-                params: {address: _address}
-            });
-            if (ret.err) {
-                console.error(`isMiner failed for ${ret.err};`);
-                return ;
-            }
-            console.log(`${ret.value!}`);
         },
     };
 
-    function runCmd(_cmd: string) {
+    function runCmd(cmd: string) {
         let chain = runEnv;
         try {
-            eval(_cmd);
+            eval(cmd);
         } catch (e) {
-            console.error('e=' + e.message);
+            console.error(e.message);
         }
     }
-
-    async function wait() {
-        return await new Promise((v) => {
-            setTimeout(() => {
-                v(true);
-            }, 1000);
-        });
-    }
-
-    async function r() {
-        runEnv.register('12nD5LgUnLZDbyncFnoFB43YxhSFsERcgQ', '1');
-        await wait();
-        runEnv.register('1EYLLvMtXGeiBJ7AZ6KJRP2BdAQ2Bof79', '1');
-        await wait();
-        runEnv.register('1EDUHDo4tch21Go1qEyTWt5JSUgsGg4H7p', '1');
-        await wait();
-        runEnv.register('18c54BbYrHDtwZeY8i28PxNQtkWiYCNLQN', '1');
-        await wait();
-        runEnv.register('17SXcUf89AZYCPpe5wVdCYM5NbMgXhmqVt', '1');
-        await wait();
-        runEnv.register('15tETqMvoe3HpbU7GjAW9LZaZgfaJQCwd4', '1');
-        await wait();
-        console.log(`=============end`);
-    }
-    r();
-
-    let cmd = command.options.get('run');
-    if (cmd) {
-        runCmd(cmd);
+    
+    let c = command.options.get('run');
+    if (c) {
+        runCmd(c);
     }
 
     let rl = readline.createInterface(process.stdin, process.stdout);
-    rl.on('line', (_cmd: string) => {
-        runCmd(_cmd);
+    rl.on('line', (cmd: string) => {
+        runCmd(cmd);
     });
 }
 

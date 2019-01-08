@@ -8,7 +8,7 @@ import {BlockHeader, Block} from './block';
 import {IHeaderStorage} from './header_storage';
 import {Transaction, Receipt} from './transaction';
 
-import {INode, NodeConnection} from '../net';
+import {INode, NodeConnection, PackageStreamWriter} from '../net';
 import { isNullOrUndefined } from 'util';
 const {LogShim} = require('../lib/log_shim');
 
@@ -33,6 +33,11 @@ export enum BAN_LEVEL {
     day = 24 * 60,
     month = 30 * 24 * 60,
     forever = 0,
+}
+
+export enum NetworkBroadcastStrategy {
+    transaction = 1,
+    headers = 2
 }
 
 export class Network extends EventEmitter {
@@ -98,6 +103,26 @@ export class Network extends EventEmitter {
         let value = Object.create(null);
         value.ignoreBan = options.origin.get('ignoreBan');
         value.nodeCacheSize = options.origin.get('nodeCacheSize');
+        let strategyOptNames = {
+            broadcast_limit_transaction: NetworkBroadcastStrategy.transaction,  
+            broadcast_limit_headers: NetworkBroadcastStrategy.headers
+        };
+        value.strategy = new Map();
+        for (const [n, s] of Object.entries(strategyOptNames)) {
+            const ss = options.origin.get(n);
+            if (ss) {
+                let count;
+                count = Number.parseInt(ss);
+                
+                let filter;
+                if (isNaN(count)) {
+                    const address = (ss as string).split(',');
+                    count = address.length;
+                    filter = (conn: NodeConnection): boolean => address.indexOf(conn.remote!) !== -1;
+                }
+                value.strategy.set(s, {count, filter});
+            }
+        }
         return {err: ErrorCode.RESULT_OK, value};
     }
 
@@ -107,11 +132,14 @@ export class Network extends EventEmitter {
             count: options.nodeCacheSize ? options.nodeCacheSize : 50, 
             dataDir: this.m_dataDir, 
             logger: this.m_logger});
+        for (const [n, s] of options.strategy) {
+            this.addBroadcastStrategy(n, s);
+        }
     }
 
     async init(): Promise<ErrorCode> {
         this.m_node.on('error', (conn: NodeConnection, err: ErrorCode) => {
-            this.emit('error', conn.network, conn.remote);
+            this.emit('error', conn.remote);
         });
 
         // 收到net/node的ban事件, 调用 ChainNode的banConnection方法做封禁处理
@@ -180,7 +208,7 @@ export class Network extends EventEmitter {
             if (callback) {
                 callback(0);
             }
-            return ErrorCode.RESULT_OK;
+            return ErrorCode.RESULT_SKIPPED;
         }
 
         let ops = [];
@@ -194,7 +222,7 @@ export class Network extends EventEmitter {
             if (callback) {
                 callback(0);
             }
-            return ErrorCode.RESULT_OK;
+            return ErrorCode.RESULT_SKIPPED;
         }
         
         Promise.all(ops).then((results) => {
@@ -271,6 +299,40 @@ export class Network extends EventEmitter {
 
         return true;
     }
+
+    broadcast(writer: PackageStreamWriter, options?: {
+        count?: number, filter?: (conn: NodeConnection) => boolean, strategy?: number}): Promise<{err: ErrorCode}> {
+        let bopt = Object.create(null);
+        if (options) {
+            bopt.count  = options.count;
+            bopt.filter = options.filter;
+            if (!isNullOrUndefined(options.strategy)) {
+                const s  = this.m_broadcastStrategies.get(options.strategy);
+                if (s) {
+                    if (!isNullOrUndefined(s.count)) {
+                        bopt.count = isNullOrUndefined(bopt.count) ? s.count : Math.min(bopt.count, s.count);
+                    } 
+                    if (s.filter) {
+                        if (bopt.filter) {
+                            let srcFilter = bopt.filter;
+                            bopt.filter = (conn: NodeConnection): boolean => srcFilter(conn) && s.filter!(conn);
+                        } else {
+                            bopt.filter = s.filter;
+                        }
+                    }
+                } 
+            }
+        }
+        
+        return this.m_node.broadcast(writer, bopt);
+    }
+
+    addBroadcastStrategy(strategy: number, options: {count?: number, filter?: (conn: NodeConnection) => boolean}) {
+        this.m_broadcastStrategies.set(strategy, {count: options.count, filter: options.filter});
+    }
+
+    private m_broadcastStrategies: Map<number, {count?: number, filter?: (conn: NodeConnection) => boolean}> = new Map();
+
 }
 
 type NodeInstance = (commandOptions: Map<string, any>) => INode;

@@ -8,7 +8,7 @@ import {JsonStorage} from './storage_json/storage';
 import {SqliteStorage} from './storage_sqlite/storage';
 import { LoggerInstance } from './lib/logger_util';
 import {Chain, Block, Transaction, BlockHeader, Receipt, BlockHeightListener} from './chain';
-import {ValueTransaction, ValueBlockHeader, ValueBlockExecutor, ValueReceipt} from './value_chain';
+import {ValueTransaction, ValueBlockHeader, ValueBlockExecutor, ValueReceipt, BlockContent} from './value_chain';
 import {createKeyPair, addressFromSecretKey} from './address';
 import {Storage, StorageDumpSnapshotManager, StorageManager, StorageLogSnapshotManager} from './storage';
 import { isArray, isNullOrUndefined } from 'util';
@@ -147,7 +147,11 @@ export class ValueChainDebugSession {
 
 export class ValueIndependDebugSession {
     private m_storage?: Storage;
-    private m_curHeader?: ValueBlockHeader;
+    private m_curBlock?: {
+        header: ValueBlockHeader,
+        transactions: ValueTransaction[],
+        receipts: Receipt[]
+    };
     private m_accounts?: Buffer[];
     private m_interval?: number;
     private m_fakeNonces: Map<string, number>;
@@ -163,7 +167,7 @@ export class ValueIndependDebugSession {
         preBalance?: BigNumber,
         memoryStorage?: boolean,
         storageDir?: string
-    }): Promise<ErrorCode> {
+    }): Promise<{err: ErrorCode, blocks?: Block[]}> {
         const storageOptions = Object.create(null);
         storageOptions.memory = options.memoryStorage;
         if (!(isNullOrUndefined(options.memoryStorage) || options.memoryStorage)) {
@@ -174,9 +178,10 @@ export class ValueIndependDebugSession {
         }
         const csr = await this.debuger.createStorage(storageOptions);
         if (csr.err) {
-            return csr.err;
+            return {err: csr.err};
         }
         this.m_storage = csr.storage!;
+        this.m_storage.createLogger();
         if (isArray(options.accounts)) {
             this.m_accounts = options.accounts.map((x) => Buffer.from(x));
         } else {
@@ -204,57 +209,95 @@ export class ValueIndependDebugSession {
         const err = await chain.onCreateGenesisBlock(block, csr.storage!, genesissOptions);
         if (err) {
             chain.logger.error(`onCreateGenesisBlock failed for `, stringifyErrorCode(err));
-            return err;
+            return {err};
         }
         block.header.updateHash();
         const dber = await this.debuger.debugBlockEvent(this.m_storage!, block.header, {preBlock: true});
         if (dber.err) {
-            return err;
+            return {err};
         }
-        this.m_curHeader = block.header as ValueBlockHeader;
+        this.m_curBlock = {
+            header: block.header as ValueBlockHeader,
+            transactions: [],
+            receipts: []
+        };
+        this.m_curBlock.receipts.push(...dber.receipts!);
         if (options.height > 0) {
-            const _err = this.updateHeightTo(options.height, options.coinbase, true);
-            if (_err) {
-                return _err;
-            }
+            return await this.updateHeightTo(options.height, options.coinbase);
         }
-        return ErrorCode.RESULT_OK;
+        return {err: ErrorCode.RESULT_OK};
     }
 
     get curHeader(): ValueBlockHeader {
-        return this.m_curHeader!;
+        return this.m_curBlock!.header;
     }
 
     get storage(): Storage {
         return this.m_storage!;
     }
 
-    async updateHeightTo(height: number, coinbase: number, events?: boolean): Promise<ErrorCode> {
-        if (height <= this.m_curHeader!.number) {
-            this.debuger.chain.logger.error(`updateHeightTo ${height} failed for current height ${this.m_curHeader!.number} is larger`); 
-            return ErrorCode.RESULT_INVALID_PARAM;
+    async updateHeightTo(height: number, coinbase: number): Promise<{err: ErrorCode, blocks?: Block[]}> {
+        if (height <= this.m_curBlock!.header.number) {
+            this.debuger.chain.logger.error(`updateHeightTo ${height} failed for current height ${this.m_curBlock!.header.number} is larger`); 
+            return {err: ErrorCode.RESULT_INVALID_PARAM};
         }
-        let curHeader = this.m_curHeader!;
-        if (events) {
-            const {err} = await this.debuger.debugBlockEvent(this.m_storage!, curHeader, {postBlock: true});
-            if (err) {
-                return err;
-            }
-        }
-        const offset = height - curHeader.number;
+        const offset = height - this.m_curBlock!.header.number;
+        let blocks = [];
         for (let i = 0; i < offset; ++i) {
-            let header = this.debuger.chain.newBlockHeader() as ValueBlockHeader;
-            header.timestamp = curHeader.timestamp + this.m_interval!;
-            header.coinbase = addressFromSecretKey(this.m_accounts![coinbase])!;
-            header.setPreBlock(curHeader);
-            curHeader = header;
-            const {err} = await this.debuger.debugBlockEvent(this.m_storage!, curHeader, 
-                {preBlock: true, postBlock: curHeader.number !== height});
-            return err;
+            const nhr = await this._nextHeight(coinbase, []);
+            if (nhr.err) {
+                return {err: nhr.err};
+            }
+            blocks.push(nhr.block!);
+        }
+        return {err: ErrorCode.RESULT_OK, blocks};
+    }
+
+    nextHeight(coinbase: number, transactions: ValueTransaction[]): Promise<{err: ErrorCode, block?: Block}> {
+        return this._nextHeight(coinbase, transactions);
+    }
+
+    protected async _nextHeight(coinbase: number, transactions: ValueTransaction[]): Promise<{err: ErrorCode, block?: Block}> {
+        let curHeader =  this.m_curBlock!.header;
+
+        for (let tx of transactions) {
+            const dtr = await this.debuger.debugTransaction(this.m_storage!, curHeader, tx);
+            if (dtr.err) {
+                return {err: dtr.err};
+            }
+            this.m_curBlock!.transactions.push(tx);
+            this.m_curBlock!.receipts.push(dtr.receipt!);
         }
 
-        this.m_curHeader = curHeader;
-        return ErrorCode.RESULT_OK;
+        let dber = await this.debuger.debugBlockEvent(this.m_storage!, curHeader, {postBlock: true});
+        if (dber.err) {
+            return {err: dber.err};
+        }
+        this.m_curBlock!.receipts.push(...dber.receipts!);
+
+        let block = this.debuger.chain.newBlock(this.m_curBlock!.header);
+        for (const tx of this.m_curBlock!.transactions) {
+            block.content.addTransaction(tx);
+        }
+        block.content.setReceipts(this.m_curBlock!.receipts);
+        block.header.updateHash();
+        
+        let header = this.debuger.chain.newBlockHeader() as ValueBlockHeader;
+        header.timestamp = curHeader.timestamp + this.m_interval!;
+        header.coinbase = addressFromSecretKey(this.m_accounts![coinbase])!;
+        header.setPreBlock(block.header);
+        this.m_curBlock = {
+            header: header as ValueBlockHeader,
+            transactions: [],
+            receipts: []
+        };
+        dber = await this.debuger.debugBlockEvent(this.m_storage!, curHeader, 
+            {preBlock: true});
+        if (dber.err) {
+            return {err: dber.err};
+        }
+        this.m_curBlock!.receipts.push(...dber.receipts!);
+        return {err: ErrorCode.RESULT_OK, block};
     }
 
     createTransaction(options: {caller: number|Buffer, method: string, input: any, value: BigNumber, fee: BigNumber, nonce?: number}): ValueTransaction {
@@ -275,7 +318,7 @@ export class ValueIndependDebugSession {
         return tx;
     }
 
-    transaction(options: {caller: number|Buffer, method: string, input: any, value: BigNumber, fee: BigNumber, nonce?: number}): Promise<{err: ErrorCode, receipt?: Receipt}> {
+    async transaction(options: {caller: number|Buffer, method: string, input: any, value: BigNumber, fee: BigNumber, nonce?: number}): Promise<{err: ErrorCode, receipt?: Receipt}> {
         let pk: Buffer;
         if (Buffer.isBuffer(options.caller)) {
             pk = options.caller;
@@ -288,15 +331,21 @@ export class ValueIndependDebugSession {
         const txop = Object.create(options);
         txop.nonce = nonce;
         const tx = this.createTransaction(txop);
-        return this.debuger.debugTransaction(this.m_storage!, this.m_curHeader!, tx);
+        const dtr = await this.debuger.debugTransaction(this.m_storage!, this.m_curBlock!.header, tx);
+        if (dtr.err) {
+            return {err: dtr.err};
+        } 
+        this.m_curBlock!.transactions.push(tx);
+        this.m_curBlock!.receipts.push(dtr.receipt!);
+        return dtr;
     }
 
     wage(): Promise<{err: ErrorCode}> {
-        return this.debuger.debugMinerWageEvent(this.m_storage!, this.m_curHeader!);
+        return this.debuger.debugMinerWageEvent(this.m_storage!, this.m_curBlock!.header!);
     }
 
     view(options: {method: string, params: any}): Promise<{err: ErrorCode, value?: any}> {
-        return this.debuger.debugView(this.m_storage!, this.m_curHeader!, options.method, options.params);
+        return this.debuger.debugView(this.m_storage!, this.m_curBlock!.header, options.method, options.params);
     }
 
     getAccount(index: number): string {
@@ -336,7 +385,7 @@ class ChainDebuger {
     async debugTransaction(storage: Storage, header: BlockHeader, tx: Transaction): Promise<{err: ErrorCode, receipt?: Receipt}> {
         const block = this.chain.newBlock(header);
         
-        const nber = await this.chain.newBlockExecutor(block, storage);
+        const nber = await this.chain.newBlockExecutor({block, storage});
         if (nber.err) {
             return {err: nber.err};
         }
@@ -344,6 +393,8 @@ class ChainDebuger {
         if (etr.err) {
             return {err: etr.err};
         }
+
+        await nber.executor!.finalize();
         
         return {err: ErrorCode.RESULT_OK, receipt: etr.receipt};
     }
@@ -352,31 +403,50 @@ class ChainDebuger {
             listener?: BlockHeightListener,
             preBlock?: boolean,
             postBlock?: boolean
-        }): Promise<{err: ErrorCode}> {
+        }): Promise<{err: ErrorCode, receipts?: Receipt[]}> {
         const block = this.chain.newBlock(header);
         
-        const nber = await this.chain.newBlockExecutor(block, storage);
+        const nber = await this.chain.newBlockExecutor({block, storage});
         if (nber.err) {
             return {err: nber.err};
         }
-        if (options.listener) {
-            const err = await nber.executor!.executeBlockEvent(options.listener);
-            return {err};
-        } else {
-            if (options.preBlock) {
-                const err = await nber.executor!.executePreBlockEvent();
-                if (err) {
-                    return {err};
+
+        let result;
+        do {
+            
+            if (options.listener) {
+                const ebr = await nber.executor!.executeBlockEvent(options.listener);
+                if (ebr.err) {
+                    result = {err: ebr.err};
+                    break;
+                } else {
+                    result = {err: ErrorCode.RESULT_OK, receipts: [ebr.receipt!]};
+                    break;
                 }
-            }
-            if (options.postBlock) {
-                const err = await nber.executor!.executePostBlockEvent();
-                if (err) {
-                    return {err};
+            } else {
+                let receipts = [];
+                if (options.preBlock) {
+                    const ebr = await nber.executor!.executePreBlockEvent();
+                    if (ebr.err) {
+                        result = {err: ebr.err};
+                        break;
+                    }
+                    receipts.push(...ebr.receipts!);
                 }
+                if (options.postBlock) {
+                    const ebr = await nber.executor!.executePostBlockEvent();
+                    if (ebr.err) {
+                        result = {err: ebr.err};
+                        break;
+                    }
+                    receipts.push(...ebr.receipts!);
+                }
+                result = {err: ErrorCode.RESULT_OK, receipts};
             }
-            return {err: ErrorCode.RESULT_OK};
-        }
+        } while (false);
+
+        await nber.executor!.finalize();
+        return result;
     }
 
     async debugView(storage: Storage, header: BlockHeader, method: string, params: any): Promise<{err: ErrorCode, value?: any}> {
@@ -390,12 +460,15 @@ class ChainDebuger {
     }
 
     async debugBlock(storage: Storage, block: Block): Promise<{err: ErrorCode}> {
-        const nber = await this.chain.newBlockExecutor(block, storage);
+        const nber = await this.chain.newBlockExecutor({block, storage});
         if (nber.err) {
             return {err: nber.err};
         }
 
         const err = await nber.executor!.execute();
+
+        await nber.executor!.finalize();
+
         return {err};
     }
 }
@@ -404,12 +477,15 @@ export class ValueChainDebuger extends ChainDebuger {
     async debugMinerWageEvent(storage: Storage, header: BlockHeader): Promise<{err: ErrorCode}> {
         const block = this.chain.newBlock(header);
         
-        const nber = await this.chain.newBlockExecutor(block, storage);
+        const nber = await this.chain.newBlockExecutor({block, storage});
         if (nber.err) {
             return {err: nber.err};
         }
 
         const err = await (nber.executor! as ValueBlockExecutor).executeMinerWageEvent();
+        
+        await nber.executor!.finalize();
+        
         return {err};
 
     }

@@ -79,9 +79,6 @@ export class Miner extends EventEmitter {
             return chainRet;
         }
         let value = chainRet.value!;
-        if (options.origin.has('genesisMiner')) {
-            value.minOutbound = 0;
-        }
         return {err: ErrorCode.RESULT_OK, value};
     }
 
@@ -135,12 +132,15 @@ export class Miner extends EventEmitter {
             if (err) {
                 break;
             }
-            let nber = await this.chain.newBlockExecutor(genesis, sr.storage!);
+            let nber = await this.chain.newBlockExecutor({block: genesis, storage: sr.storage!});
             if (nber.err) {
                 err = nber.err;
                 break;
             }
             err = await nber.executor!.execute();
+
+            await nber.executor!.finalize();
+
             if (err) {
                 break;
             }
@@ -269,7 +269,7 @@ export class Miner extends EventEmitter {
 
     protected async _createBlock(header: BlockHeader): Promise<{err: ErrorCode, block?: Block}> {
         let block = this.chain.newBlock(header);
-        this.pushTx(block);
+        this._collectTransactions(block);
         await this._decorateBlock(block);
         const cer = await this._createExecuteRoutine(block);
         if (cer.err) {
@@ -278,7 +278,7 @@ export class Miner extends EventEmitter {
         return cer.next!();
     }
 
-    protected pushTx(block: Block) {
+    protected _collectTransactions(block: Block) {
         let tx = this.chain.pending.popTransaction();
         while (tx) {
             block.content.addTransaction(tx);

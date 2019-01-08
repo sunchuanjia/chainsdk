@@ -17,7 +17,8 @@ describe('token', () => {
             assert(!mdr.err, 'createValueMemoryDebuger failed', stringifyErrorCode(mdr.err));
             const debuger = mdr.debuger!;
             session = debuger.createIndependSession();
-            assert(!(await session.init({height: 0, accounts: 4, coinbase: 0, interval: 10, preBalance: fromCoin(1)})), 'init session failed');
+            const sir = await session.init({height: 0, accounts: 4, coinbase: 0, interval: 10, preBalance: fromCoin(1)});
+            assert(!sir.err, 'init session failed');
         }
         __test().then(done);
     });
@@ -180,7 +181,7 @@ describe('token', () => {
                 }
             );
             assert(!terr.err && terr.receipt!.returnCode === ErrorCode.RESULT_NOT_ENOUGH, `BidGood2 failed. ${terr.err}`);
-            await session.updateHeightTo(6, 0, true);
+            await session.updateHeightTo(6, 0);
             gbr = await session.view({method: 'GetBidInfo', params: {name: 'goods1'}});
             assert(gbr.value!.owner === session.getAccount(1), `check owner failed, except ${session.getAccount(1)}, actual ${gbr.value!.owner}`);
             assert(gbr.value!.value.eq(11), `check value failed, except 11, actual ${gbr.value!.value.toString()}`);

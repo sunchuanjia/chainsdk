@@ -10,7 +10,6 @@ process.on('unhandledRejection', (reason, p) => {
 });
 
 describe('blockExecutor', () => {
-    let headerStorage: HeaderStorage;
     const logger = initLogger({loggerOptions: {console: true, level: 'debug'}});
     let creator: ChainCreator;
     let debuger: ValueChainDebuger;
@@ -73,8 +72,8 @@ describe('blockExecutor', () => {
     // it(`profile transactions in memory storage`, (done) => {
     //     async function __test() {
     //         const session = debuger.createIndependSession();
-    //         let err = await session.init({height: 0, accounts: 100, coinbase: 0, interval: 0});
-    //         assert(!err, 'init session failed');
+    //         let sir = await session.init({height: 0, accounts: 100, coinbase: 0, interval: 0});
+    //         assert(!sir.err, 'init session failed');
     //         for (let ix = 0; ix < 1200; ++ix) {
     //             const tr = await session.transaction({caller: 0, method: 'transferTo', input: {to: session.getAccount(1)}, value: new BigNumber(0), fee: new BigNumber(0)});
     //             assert(!tr.err, 'execute transaction failed');
@@ -87,8 +86,8 @@ describe('blockExecutor', () => {
     // it(`profile transactions in sqlite storage`, (done) => {
     //     async function __test() {
     //         const session = debuger.createIndependSession();
-    //         let err = await session.init({height: 0, accounts: 100, coinbase: 0, interval: 0, memoryStorage: false, storageDir: debuger.chain.dataDir});
-    //         assert(!err, 'init session failed');
+    //         let sir = await session.init({height: 0, accounts: 100, coinbase: 0, interval: 0, memoryStorage: false, storageDir: debuger.chain.dataDir});
+    //         assert(!sir.err, 'init session failed');
     //         for (let ix = 0; ix < 1200; ++ix) {
     //             const tr = await session.transaction({caller: 0, method: 'transferTo', input: {to: session.getAccount(1)}, value: new BigNumber(0), fee: new BigNumber(0)});
     //             assert(!tr.err, 'execute transaction failed');
@@ -98,30 +97,30 @@ describe('blockExecutor', () => {
     //     __test().then(done);
     // });
 
-    // it(`inprocess routine`, (done) => {
-    //     async function __test() {
-    //         const session = debuger.createIndependSession();
-    //         let err = await session.init({height: 0, accounts: 100, coinbase: 0, interval: 0});
-    //         assert(!err, 'init session failed');
-    //         const block = debuger.chain.newBlock(session.curHeader);
+    it(`inprocess routine`, (done) => {
+        async function __test() {
+            const session = debuger.createIndependSession();
+            let sir = await session.init({height: 0, accounts: 100, coinbase: 0, interval: 0});
+            assert(!sir.err, 'init session failed');
+            const block = debuger.chain.newBlock(session.curHeader);
             
-    //         for (let ix = 0; ix < 100; ++ix) {
-    //             const tx = session.createTransaction({caller: 0, method: 'transferTo', input: {to: session.getAccount(1)}, value: new BigNumber(0), fee: new BigNumber(0), nonce: ix});
-    //             block.content.addTransaction(tx);
-    //         }
-    //         const rcr =  new InprocessRoutineManager(debuger.chain).create({block, storage: session.storage});
-    //         assert(!rcr.err, 'create routine failed');
-    //         const er = await rcr.routine.execute();
-    //         assert(!er.err && !er.result!.err, 'routine execute failed');
-    //     }
-    //     __test().then(done);
-    // });
+            for (let ix = 0; ix < 100; ++ix) {
+                const tx = session.createTransaction({caller: 0, method: 'transferTo', input: {to: session.getAccount(1)}, value: new BigNumber(0), fee: new BigNumber(0), nonce: ix});
+                block.content.addTransaction(tx);
+            }
+            const rcr =  new InprocessRoutineManager(debuger.chain).create({name: `${block.hash}${Date.now()}`, block, storage: session.storage});
+            assert(!rcr.err, 'create routine failed');
+            const er = await rcr.routine.execute();
+            assert(!er.err && !er.result!.err, 'routine execute failed');
+        }
+        __test().then(done);
+    });
 
     // it(`cancel inprocess routine`, (done) => {
     //     async function __test() {
     //         const session = debuger.createIndependSession();
-    //         let err = await session.init({height: 0, accounts: 100, coinbase: 0, interval: 0});
-    //         assert(!err, 'init session failed');
+    //         let sir = await session.init({height: 0, accounts: 100, coinbase: 0, interval: 0});
+    //         assert(!sir.err, 'init session failed');
     //         debuger.chain.newBlock(session.curHeader);
             
     //         for (let ix = 0; ix < 100; ++ix) {
@@ -140,8 +139,8 @@ describe('blockExecutor', () => {
     it(`interprocess routine`, (done) => {
         async function __test() {
             const session = debuger.createIndependSession();
-            let err = await session.init({height: 0, accounts: 100, coinbase: 0, interval: 0, memoryStorage: false, storageDir: debuger.chain.dataDir});
-            assert(!err, 'init session failed');
+            let sir = await session.init({height: 0, accounts: 100, coinbase: 0, interval: 0, memoryStorage: false, storageDir: debuger.chain.dataDir});
+            assert(!sir.err, 'init session failed');
             const block = debuger.chain.newBlock(session.curHeader);
             
             for (let ix = 0; ix < 100; ++ix) {
@@ -159,8 +158,8 @@ describe('blockExecutor', () => {
     // it(`cancel interprocess routine`, (done) => {
     //     async function __test() {
     //         const session = debuger.createIndependSession();
-    //         let err = await session.init({height: 0, accounts: 100, coinbase: 0, interval: 0, memoryStorage: false, storageDir: debuger.chain.dataDir});
-    //         assert(!err, 'init session failed');
+    //         let sir = await session.init({height: 0, accounts: 100, coinbase: 0, interval: 0, memoryStorage: false, storageDir: debuger.chain.dataDir});
+    //         assert(!sir.err, 'init session failed');
     //         const block = debuger.chain.newBlock(session.curHeader);
             
     //         for (let ix = 0; ix < 100; ++ix) {
