@@ -7,3 +7,4 @@ data_*
 yarn.lock
 .projectile
 package-lock.json
+*~

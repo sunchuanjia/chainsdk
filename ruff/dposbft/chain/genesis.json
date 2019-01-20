@@ -1,0 +1,35 @@
+{
+  "preBalances": [{
+    "address": "1EYLLvMtXGeiBJ7AZ6KJRP2BdAQ2Bof79",
+    "amount": 10000000000
+  }, {
+    "address": "12nD5LgUnLZDbyncFnoFB43YxhSFsERcgQ",
+    "amount": 100000
+  }, {
+    "address": "1LuwjNj8wkqo237N7Gh8nZSSvUa6TZ5ds4",
+    "amount": 100000
+  }, {
+    "address": "13CS9dBwmaboedj2hPWx6Dgzt4cowWWoNZ",
+    "amount": 100000
+  }, {
+    "address": "1Bbruv7E4nP62ZD4cJqxiGrUD43psK5E2J",
+    "amount": 100000
+  }, {
+    "address": "159ueJXY2cBK78pjrsJXwhPGsWfJTJeik1",
+    "amount": 100000
+  }],
+  "miners": [
+    "1EYLLvMtXGeiBJ7AZ6KJRP2BdAQ2Bof79",
+    "12nD5LgUnLZDbyncFnoFB43YxhSFsERcgQ",
+    "1LuwjNj8wkqo237N7Gh8nZSSvUa6TZ5ds4"
+  ],
+  "candidates": [
+    "1EYLLvMtXGeiBJ7AZ6KJRP2BdAQ2Bof79",
+    "12nD5LgUnLZDbyncFnoFB43YxhSFsERcgQ",
+    "1LuwjNj8wkqo237N7Gh8nZSSvUa6TZ5ds4",
+    "13CS9dBwmaboedj2hPWx6Dgzt4cowWWoNZ",
+    "1Bbruv7E4nP62ZD4cJqxiGrUD43psK5E2J",
+    "159ueJXY2cBK78pjrsJXwhPGsWfJTJeik1"
+  ],
+  "coinbase": "1EYLLvMtXGeiBJ7AZ6KJRP2BdAQ2Bof79"
+}
