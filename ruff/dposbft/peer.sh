@@ -1,0 +1,1 @@
+node ./dist/blockchain-sdk/src/tool/host.js peer --genesis "./data/dposbft/genesis" --dataDir "./data/dposbft/peer1" --loggerConsole --loggerLevel debug --rpchost 0.0.0.0 --rpcport 18089 --feelimit 10 --net bdt --host 0.0.0.0 --port "13010|13000" --peerid ruff1_peer1 --sn SN_RUFF_TEST@42.159.86.15@10000@10001 --bdt_log_level info --ignoreBan --executor inprocess

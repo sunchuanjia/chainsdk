@@ -1,13 +1,13 @@
-import {Transaction, BlockHeader} from '../block';
-import {Chain} from './chain';
-import {ErrorCode} from '../error_code';
-import {LoggerInstance} from '../lib/logger_util';
-import {StorageManager, IReadableStorage} from '../storage';
+import { Transaction, BlockHeader } from '../block';
+import { Chain } from './chain';
+import { ErrorCode } from '../error_code';
+import { LoggerInstance } from '../lib/logger_util';
+import { StorageManager, IReadableStorage } from '../storage';
 import { BaseHandler } from '../executor';
-import {EventEmitter} from 'events';
-import {LRUCache} from '../lib/LRUCache';
+import { EventEmitter } from 'events';
+import { LRUCache } from '../lib/LRUCache';
 
-export type TransactionWithTime = {tx: Transaction, ct: number};
+export type TransactionWithTime = { tx: Transaction, ct: number };
 enum SyncOptType {
     updateTip = 0,
     popTx = 1,
@@ -95,8 +95,8 @@ export class PendingTransactions extends EventEmitter {
             this.m_logger.warn(`addTransaction failed, tx exist,hash=${tx.hash}`);
             return ErrorCode.RESULT_TX_EXIST;
         }
-        
-        let opt: SyncOpt = {_type: SyncOptType.addTx, param: {tx, ct: Date.now()}};
+
+        let opt: SyncOpt = { _type: SyncOptType.addTx, param: { tx, ct: Date.now() } };
         this._addPendingOpt(opt);
         return ErrorCode.RESULT_OK;
     }
@@ -121,7 +121,7 @@ export class PendingTransactions extends EventEmitter {
         this.m_curHeader = header;
         this.m_storageView = svr.storage!;
 
-        this._addPendingOpt({_type: SyncOptType.updateTip, param: undefined});
+        this._addPendingOpt({ _type: SyncOptType.updateTip, param: undefined });
         return ErrorCode.RESULT_OK;
     }
 
@@ -186,7 +186,7 @@ export class PendingTransactions extends EventEmitter {
                     }
                 }
                 for (let i = 0; i < this.m_transactions.length; i++) {
-                    this.m_queueOpt.splice(i + pos, 0, {_type: SyncOptType.addTx, param: this.m_transactions[i]});
+                    this.m_queueOpt.splice(i + pos, 0, { _type: SyncOptType.addTx, param: this.m_transactions[i] });
                 }
                 this.m_mapNonce = new Map();
                 this.m_transactions = [];
@@ -197,7 +197,7 @@ export class PendingTransactions extends EventEmitter {
         }
     }
 
-    protected async _onCheck(txTime: TransactionWithTime,  txOld?: TransactionWithTime): Promise<ErrorCode> {
+    protected async _onCheck(txTime: TransactionWithTime, txOld?: TransactionWithTime): Promise<ErrorCode> {
         return ErrorCode.RESULT_OK;
     }
 
@@ -235,7 +235,7 @@ export class PendingTransactions extends EventEmitter {
             this._addToQueue(txTime, -1);
             await this._onAddedTx(txTime);
             await this._scanOrphan(address);
-            return ErrorCode.RESULT_OK;   
+            return ErrorCode.RESULT_OK;
         }
 
         if (nonce! + 1 < txTime.tx.nonce) {
@@ -251,37 +251,37 @@ export class PendingTransactions extends EventEmitter {
     }
 
     // 获取mem中的nonce值
-    public async getNonce(address: string): Promise<{err: ErrorCode, nonce?: number}> {
+    public async getNonce(address: string): Promise<{ err: ErrorCode, nonce?: number }> {
         if (this.m_mapNonce.has(address)) {
-            return {err: ErrorCode.RESULT_OK, nonce: this.m_mapNonce.get(address) as number};
+            return { err: ErrorCode.RESULT_OK, nonce: this.m_mapNonce.get(address) as number };
         } else {
             return await this.getStorageNonce(address);
         }
     }
 
-    public async getStorageNonce(s: string): Promise<{err: ErrorCode, nonce?: number}> {
+    public async getStorageNonce(s: string): Promise<{ err: ErrorCode, nonce?: number }> {
         try {
             let dbr = await this.m_storageView!.getReadableDataBase(Chain.dbSystem);
             if (dbr.err) {
                 this.m_logger.error(`get system database failed ${dbr.err}`);
-                return {err: dbr.err};
+                return { err: dbr.err };
             }
             let nonceTableInfo = await dbr.value!.getReadableKeyValue(Chain.kvNonce);
             if (nonceTableInfo.err) {
                 this.m_logger.error(`getStorageNonce, getReadableKeyValue failed,errcode=${nonceTableInfo.err}`);
-                return {err: nonceTableInfo.err};
+                return { err: nonceTableInfo.err };
             }
             let ret = await nonceTableInfo.kv!.get(s);
             if (ret.err) {
                 if (ret.err === ErrorCode.RESULT_NOT_FOUND) {
-                    return {err: ErrorCode.RESULT_OK, nonce: -1};
+                    return { err: ErrorCode.RESULT_OK, nonce: -1 };
                 }
-                return {err: ret.err};
+                return { err: ret.err };
             }
-            return {err: ErrorCode.RESULT_OK, nonce: ret.value as number};
+            return { err: ErrorCode.RESULT_OK, nonce: ret.value as number };
         } catch (error) {
             this.m_logger.error(`getStorageNonce exception, error=${error},address=${s}`);
-            return {err: ErrorCode.RESULT_EXCEPTION};
+            return { err: ErrorCode.RESULT_EXCEPTION };
         }
     }
 
@@ -314,7 +314,7 @@ export class PendingTransactions extends EventEmitter {
 
         let l: TransactionWithTime[] = this.m_orphanTx.get(s) as TransactionWithTime[];
 
-        let {err, nonce} = await this.getNonce(s);
+        let { err, nonce } = await this.getNonce(s);
         while (true) {
             if (l.length === 0) {
                 this.m_orphanTx.delete(s);
@@ -328,7 +328,7 @@ export class PendingTransactions extends EventEmitter {
 
             if (nonce! + 1 === l[0].tx.nonce) {
                 let txTime: TransactionWithTime = l.shift() as TransactionWithTime;
-                this._addPendingOpt({_type: SyncOptType.addTx, param: txTime});
+                this._addPendingOpt({ _type: SyncOptType.addTx, param: txTime });
             }
             break;
         }
@@ -387,6 +387,12 @@ export class PendingTransactions extends EventEmitter {
     }
     protected async _addToOrphanMayNonceExist(txTime: TransactionWithTime): Promise<ErrorCode> {
         let s: string = txTime.tx.address as string;
+
+        // Added by Yang Jun according to Bucky suggestion 2019-1-22
+        if (this._getPendingCount() >= this.m_warnPendingCount) {
+            return ErrorCode.RESULT_OUT_OF_MEMORY;
+        }
+
         let l: TransactionWithTime[];
         if (this.m_orphanTx.has(s)) {
             l = this.m_orphanTx.get(s) as TransactionWithTime[];

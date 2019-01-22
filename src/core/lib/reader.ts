@@ -7,9 +7,9 @@
 
 'use strict';
 import * as assert from 'assert';
-import {Encoding, EncodingError} from './encoding';
+import { Encoding, EncodingError } from './encoding';
 import * as digest from './digest';
-import {BigNumber} from 'bignumber.js';
+import { BigNumber } from 'bignumber.js';
 
 const EMPTY = Buffer.alloc(0);
 
@@ -24,6 +24,11 @@ const EMPTY = Buffer.alloc(0);
  */
 
 export class BufferReader {
+    private data: Buffer;
+    private offset: number;
+    private zeroCopy: boolean;
+    private stack: any[];
+
     constructor(data: Buffer, zeroCopy?: boolean) {
         if (!(this instanceof BufferReader)) {
             return new BufferReader(data, zeroCopy);
@@ -37,11 +42,6 @@ export class BufferReader {
         this.stack = [];
     }
 
-    private data: Buffer;
-    private offset: number;
-    private zeroCopy: boolean;
-    private stack: any[];
-
     /**
      * Assertion.
      * @param {Boolean} value
@@ -50,7 +50,7 @@ export class BufferReader {
     assert(value: any) {
         if (!value) {
             throw new EncodingError(this.offset, 'Out of bounds read', assert);
-        }      
+        }
     }
 
     /**
@@ -141,11 +141,11 @@ export class BufferReader {
         if (size === data.length) {
             return data;
         }
-            
+
         if (this.zeroCopy || zeroCopy) {
             return data.slice(start, end);
         }
-            
+
         const ret = Buffer.allocUnsafe(size);
         data.copy(ret, 0, start, end);
 
@@ -467,7 +467,7 @@ export class BufferReader {
     readHash(enc?: any): any {
         if (enc) {
             return this.readString(enc, 32);
-        }  
+        }
         return this.readBytes(32);
     }
 
@@ -502,7 +502,7 @@ export class BufferReader {
         for (; i < this.data.length; i++) {
             if (this.data[i] === 0) {
                 break;
-            }   
+            }
         }
 
         this.assert(i !== this.data.length);
@@ -525,7 +525,7 @@ export class BufferReader {
         if (this.stack.length > 0) {
             start = this.stack[this.stack.length - 1];
         }
-            
+
         const data = this.data.slice(start, this.offset);
 
         return digest.hash256(data).readUInt32LE(0, true);
